@@ -9,12 +9,13 @@ import collections
 import itertools
 import json
 import logging
+import random
+import time
 
 from SoftLayer import exceptions
 from SoftLayer import utils
-import time
 
-logger = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 DEFAULT_SUBNET_MASK = ','.join(['hardware',
                                 'datacenter',
@@ -645,44 +646,45 @@ class NetworkManager(object):
         """
         result = self.network_storage.getObject(id=identifier, **kwargs)
         return result
-    
+
     def wait_for_sg_request(self, group_id, request_id, limit=60, delay=5):
         """Wait for a Security Group API request to complete.
 
-        Security Group API requests may trigger firewall updates that complete 
+        Security Group API requests may trigger firewall updates that complete
         ansynchronously.  Firewall update completion is signalled
         via an Audit Log event.  This method polls Security Group audit logs until the
         specified request is complete (either successfully or unsuccessfully).
 
         :param int group_id: The security group ID with the pending API request
-        :param int request_id: The request ID of the API request we want to verify completion for.
-        Security Group APIs that may complete asynchronously contain this value in the requestId field of their
-        return value.
+        :param int request_id: The request ID of the API request we want to verify completion
+        for.  Security Group APIs that may complete asynchronously contain this value in the
+        requestId field of their return value.
         :param int limit: The maximum amount of time to wait for completion.
         :param int delay: The number of seconds to sleep before polling checks. Defaults to 5.
 
         Example::
 
-            # Will return once firewall updates for Security Group API request 'abc123' are 
+            # Will return once firewall updates for Security Group API request 'abc123' are
             complete for security group 123456.
             net_mgr.wait_for_sg_request(123456, 'abc123')
         """
-        
+
         # Audit log event name for successfully API completion
-        SUCCESS_EVENT_NAME='Network Component Added to Security Group'
-        
+        success_event_name = 'Network Component Added to Security Group'
+
         # Audit log event name for unsuccessful API completion
-        FAILURE_EVENT_NAME='Network Component Removed from Security Group'
-        
-        logger.debug('wait %s seconds for request %s completion on Security Group %s' % (limit, request_id, group_id))
+        failure_event_name = 'Network Component Removed from Security Group'
+
+        LOGGER.debug('wait %s seconds for request %s completion on Security Group %s',
+                     limit, request_id, group_id)
         wait_until = time.time() + limit
-        
+
         for sg_id in itertools.repeat(group_id):
             try:
                 # get all event logs for the specified security group
                 logs = self.client.call("Event_Log",
-                    'getAllObjects',
-                    filter={'objectId': {'operation': sg_id}})
+                                        'getAllObjects',
+                                        filter={'objectId': {'operation': sg_id}})
 
                 #
                 # look for a log for the indicated request, there will be
@@ -696,43 +698,47 @@ class NetworkManager(object):
                     if not 'requestId' in metadata:
                         continue
                     if metadata['requestId'] == request_id:
-                        if one_log['eventName'] == SUCCESS_EVENT_NAME or one_log['eventName'] == FAILURE_EVENT_NAME:
-                            completion_log=one_log
+                        event_name = one_log['eventName']
+                        if event_name == success_event_name or event_name == failure_event_name:
+                            completion_log = one_log
                             break
 
                 #
                 # check if it's a successful or failure completion log
                 #
                 if completion_log is not None:
-                    if completion_log['eventName'] == SUCCESS_EVENT_NAME:
-                        # return True if firewall updates for the Security Group request 
+                    if completion_log['eventName'] == success_event_name:
+                        # return True if firewall updates for the Security Group request
                         # completed successfully.
-                        logger.debug('request %s complete successfully' % request_id)
+                        LOGGER.debug('request %s complete successfully', request_id)
                         return True
-                    elif completion_log['eventName'] == FAILURE_EVENT_NAME:
-                        logger.debug('request %s complete with failure' % request_id)
-                        raise exceptions.SoftLayerError("Security Group %s request %s did not complete"
-                            " within the specified timeout (%s seconds)" % (sg_id, request_id, limit))
+                    elif completion_log['eventName'] == failure_event_name:
+                        LOGGER.debug('request %s complete with failure', request_id)
+                        raise exceptions.SoftLayerError("Security Group %s request %s did not "
+                                                        "complete within the specified timeout"
+                                                        " (%s seconds)"
+                                                        % (sg_id, request_id, limit))
                     else:
-                        logger.warning('unexpected log event: %s' % completion_log['eventName'])
+                        LOGGER.warning('unexpected log event: %s', completion_log['eventName'])
                         raise exceptions.SoftLayerError("Security Group internal error, rcvd %s "
-                             % completion_log['eventName'])
+                                                        % completion_log['eventName'])
 
                 #
                 # no completion log yet, delay and try again
                 #
-                logger.info("%s not complete.", str(request_id))
-                
-            except exceptions.SoftLayerAPIError as exception:
+                LOGGER.info("%s not complete.", str(request_id))
+
+            except exceptions.SoftLayerAPIError:
                 # if the call is excepting unexpectedly, scale back how
                 # frequently we call it.
                 delay = (delay * 2) + random.randint(0, 9)
-                logger.exception()
-                
+                LOGGER.exception()
+
             now = time.time()
             if now > wait_until:
                 raise exceptions.SoftLayerError("Security Group %s request %s did not complete"
-                                            " within the specified timeout %s" % (sg_id, request_id, limit))
+                                                " within the specified timeout %s"
+                                                % (sg_id, request_id, limit))
 
-            logger.debug('Auto retry in %s seconds', str(min(delay, wait_until - now)))
+            LOGGER.debug('Auto retry in %s seconds', str(min(delay, wait_until - now)))
             time.sleep(min(delay, wait_until - now))
