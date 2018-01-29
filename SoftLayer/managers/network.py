@@ -670,16 +670,17 @@ class NetworkManager(object):
         """
 
         # Audit log event name for successfully API completion
-        success_event_name = 'Network Component Added to Security Group'
+        success_event_name = 'Network Component(s) Updated With Security Group'
 
         # Audit log event name for unsuccessful API completion
-        failure_event_name = 'Network Component Removed from Security Group'
+        failure_event_name = 'Security Group Update on Network Components Failed'
 
-        LOGGER.debug('wait %s seconds for request %s completion on Security Group %s',
+        LOGGER.info('wait %s seconds for request %s completion on Security Group %s',
                      limit, request_id, group_id)
         wait_until = time.time() + limit
 
         for sg_id in itertools.repeat(group_id):
+            LOGGER.info('check event logs for completion')
             try:
                 # get all event logs for the specified security group
                 logs = self.client.call("Event_Log",
@@ -692,16 +693,23 @@ class NetworkManager(object):
                 #
                 completion_log = None
                 for one_log in logs:
-                    if not 'metaData' in one_log:
+                    if 'metaData' not in one_log:
+                        LOGGER.info('no metaData')
                         continue
                     metadata = json.loads(one_log['metaData'])
-                    if not 'requestId' in metadata:
+                    if 'requestId' not in metadata:
+                        LOGGER.info('no requestId')
                         continue
                     if metadata['requestId'] == request_id:
+                        LOGGER.info('req Id match')
                         event_name = one_log['eventName']
                         if event_name == success_event_name or event_name == failure_event_name:
                             completion_log = one_log
                             break
+                    else:
+#                         LOGGER.info('req Id doesnt match')
+                        pass
+
 
                 #
                 # check if it's a successful or failure completion log
@@ -710,10 +718,10 @@ class NetworkManager(object):
                     if completion_log['eventName'] == success_event_name:
                         # return True if firewall updates for the Security Group request
                         # completed successfully.
-                        LOGGER.debug('request %s complete successfully', request_id)
+                        LOGGER.info('request %s complete successfully', request_id)
                         return True
                     elif completion_log['eventName'] == failure_event_name:
-                        LOGGER.debug('request %s complete with failure', request_id)
+                        LOGGER.info('request %s complete with failure', request_id)
                         raise exceptions.SoftLayerError("Security Group %s request %s did not "
                                                         "complete within the specified timeout"
                                                         " (%s seconds)"
@@ -736,9 +744,12 @@ class NetworkManager(object):
 
             now = time.time()
             if now > wait_until:
+                LOGGER.info("Security Group %s request %s did not complete"
+                                                " within the specified timeout %s",
+                                                sg_id, request_id, limit)
                 raise exceptions.SoftLayerError("Security Group %s request %s did not complete"
                                                 " within the specified timeout %s"
                                                 % (sg_id, request_id, limit))
 
-            LOGGER.debug('Auto retry in %s seconds', str(min(delay, wait_until - now)))
+            LOGGER.info('Auto retry in %s seconds', str(min(delay, wait_until - now)))
             time.sleep(min(delay, wait_until - now))
