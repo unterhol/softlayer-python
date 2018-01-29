@@ -4,3 +4,5 @@ pytest-cov
 mock
 sphinx
 testtools
+urllib3
+requests >= 2.18.4

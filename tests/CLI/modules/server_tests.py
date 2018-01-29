@@ -44,9 +44,9 @@ class ServerCLITests(testing.TestCase):
             'os': 'Ubuntu',
             'os_version': 'Ubuntu 12.04 LTS',
             'owner': 'chechu',
-            'price_rate': 21.08,
+            'prices': [{'Item': 'Total', 'Recurring Price': 16.08},
+                       {'Item': 'test', 'Recurring Price': 1}],
             'private_ip': '10.1.0.2',
-            'ptr': '2.0.1.10.in-addr.arpa',
             'public_ip': '172.16.1.100',
             'remote users': [{'password': 'abc123', 'ipmi_username': 'root'}],
             'status': 'ACTIVE',
@@ -445,3 +445,67 @@ class ServerCLITests(testing.TestCase):
             args=(100,),
             identifier=100,
         )
+
+    @mock.patch('SoftLayer.CLI.formatting.confirm')
+    def test_rescue(self, confirm_mock):
+        confirm_mock.return_value = True
+        result = self.run_command(['server', 'rescue', '1000'])
+
+        self.assert_no_fail(result)
+        self.assertEqual(result.output, "")
+        self.assert_called_with('SoftLayer_Hardware_Server', 'bootToRescueLayer', identifier=1000)
+
+    @mock.patch('SoftLayer.CLI.formatting.confirm')
+    def test_server_rescue_negative(self, confirm_mock):
+        confirm_mock.return_value = False
+        result = self.run_command(['server', 'rescue', '1000'])
+
+        self.assertEqual(result.exit_code, 2)
+        self.assertIsInstance(result.exception, exceptions.CLIAbort)
+
+    def test_ready(self):
+        mock = self.set_mock('SoftLayer_Hardware_Server', 'getObject')
+        mock.return_value = {
+            "provisionDate": "2017-10-17T11:21:53-07:00",
+            "id": 41957081
+        }
+        result = self.run_command(['hw', 'ready', '100'])
+        self.assert_no_fail(result)
+        self.assertEqual(result.output, '"READY"\n')
+
+    def test_not_ready(self):
+        mock = self.set_mock('SoftLayer_Hardware_Server', 'getObject')
+        not_ready = {
+            'activeTransaction': {
+                'transactionStatus': {'friendlyName': 'Attach Primary Disk'}
+            },
+            'provisionDate': '',
+            'id': 47392219
+        }
+        ready = {
+            "provisionDate": "2017-10-17T11:21:53-07:00",
+            "id": 41957081
+        }
+        mock.side_effect = [not_ready, ready]
+        result = self.run_command(['hw', 'ready', '100'])
+        self.assertEqual(result.exit_code, 2)
+        self.assertIsInstance(result.exception, exceptions.CLIAbort)
+
+    @mock.patch('time.sleep')
+    def test_going_ready(self, _sleep):
+        mock = self.set_mock('SoftLayer_Hardware_Server', 'getObject')
+        not_ready = {
+            'activeTransaction': {
+                'transactionStatus': {'friendlyName': 'Attach Primary Disk'}
+            },
+            'provisionDate': '',
+            'id': 47392219
+        }
+        ready = {
+            "provisionDate": "2017-10-17T11:21:53-07:00",
+            "id": 41957081
+        }
+        mock.side_effect = [not_ready, ready]
+        result = self.run_command(['hw', 'ready', '100', '--wait=100'])
+        self.assert_no_fail(result)
+        self.assertEqual(result.output, '"READY"\n')

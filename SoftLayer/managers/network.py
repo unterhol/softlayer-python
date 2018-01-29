@@ -83,7 +83,9 @@ class NetworkManager(object):
         :param str direction: The direction to enforce (egress or ingress)
         :param str ethertype: The ethertype to enforce (IPv4 or IPv6)
         :param int port_max: The upper port bound to enforce
+                             (icmp code if the protocol is icmp)
         :param int port_min: The lower port bound to enforce
+                             (icmp type if the protocol is icmp)
         :param str protocol: The protocol to enforce (icmp, udp, tcp)
         """
         rule = {'direction': direction}
@@ -233,15 +235,14 @@ class NetworkManager(object):
         """
 
         create_dict = {'name': name, 'description': description}
-        return self.security_group.createObjects([create_dict])[0]
+        return self.security_group.createObject(create_dict)
 
     def delete_securitygroup(self, group_id):
         """Deletes the specified security group.
 
         :param int group_id: The ID of the security group
         """
-        delete_dict = {'id': group_id}
-        return self.security_group.deleteObjects([delete_dict])
+        return self.security_group.deleteObject(id=group_id)
 
     def detach_securitygroup_component(self, group_id, component_id):
         """Detaches a network component from a security group.
@@ -303,8 +304,7 @@ class NetworkManager(object):
             obj['description'] = description
 
         if obj:
-            obj['id'] = group_id
-            successful = self.security_group.editObjects([obj])
+            successful = self.security_group.editObject(obj, id=group_id)
 
         return successful
 
@@ -327,19 +327,19 @@ class NetworkManager(object):
         """
         successful = False
         obj = {}
-        if remote_ip:
+        if remote_ip is not None:
             obj['remoteIp'] = remote_ip
-        if remote_group:
+        if remote_group is not None:
             obj['remoteGroupId'] = remote_group
-        if direction:
+        if direction is not None:
             obj['direction'] = direction
-        if ethertype:
+        if ethertype is not None:
             obj['ethertype'] = ethertype
-        if port_max:
+        if port_max is not None:
             obj['portRangeMax'] = port_max
-        if port_min:
+        if port_min is not None:
             obj['portRangeMin'] = port_min
-        if protocol:
+        if protocol is not None:
             obj['protocol'] = protocol
 
         if obj:

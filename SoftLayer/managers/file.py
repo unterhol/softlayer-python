@@ -87,7 +87,7 @@ class FileStorageManager(utils.IdentifierMixin, object):
                 'serviceResourceBackendIpAddress',
                 'fileNetworkMountAddress',
                 'storageTierLevel',
-                'iops',
+                'provisionedIops',
                 'lunId',
                 'originalVolumeName',
                 'originalSnapshotName',
@@ -115,7 +115,7 @@ class FileStorageManager(utils.IdentifierMixin, object):
         if 'mask' not in kwargs:
             items = [
                 'id',
-                'allowedVirtualGuests[allowedHost[credential]]',
+                'allowedVirtualGuests[allowedHost[credential, sourceSubnet]]',
                 'allowedHardware[allowedHost[credential]]',
                 'allowedSubnets[allowedHost[credential]]',
                 'allowedIpAddresses[allowedHost[credential]]',
@@ -138,6 +138,7 @@ class FileStorageManager(utils.IdentifierMixin, object):
                 'snapshotSizeBytes',
                 'storageType[keyName]',
                 'snapshotCreationTimestamp',
+                'intervalSchedule',
                 'hourlySchedule',
                 'dailySchedule',
                 'weeklySchedule'
@@ -214,10 +215,10 @@ class FileStorageManager(utils.IdentifierMixin, object):
         """
 
         file_mask = 'billingItem[activeChildren,hourlyFlag],'\
-                    'storageTierLevel,staasVersion,'\
+                    'storageTierLevel,osType,staasVersion,'\
                     'hasEncryptionAtRest,snapshotCapacityGb,schedules,'\
-                    'hourlySchedule,dailySchedule,weeklySchedule,'\
-                    'storageType[keyName],provisionedIops'
+                    'intervalSchedule,hourlySchedule,dailySchedule,'\
+                    'weeklySchedule,storageType[keyName],provisionedIops'
         file_volume = self.get_file_volume_details(volume_id,
                                                    mask=file_mask)
 
@@ -283,6 +284,35 @@ class FileStorageManager(utils.IdentifierMixin, object):
 
         return self.client.call('Product_Order', 'placeOrder', order)
 
+    def order_modified_volume(self, volume_id, new_size=None, new_iops=None, new_tier_level=None):
+        """Places an order for modifying an existing file volume.
+
+        :param volume_id: The ID of the volume to be modified
+        :param new_size: The new size/capacity for the volume
+        :param new_iops: The new IOPS for the volume
+        :param new_tier_level: The new tier level for the volume
+        :return: Returns a SoftLayer_Container_Product_Order_Receipt
+        """
+
+        mask_items = [
+            'id',
+            'billingItem',
+            'storageType[keyName]',
+            'capacityGb',
+            'provisionedIops',
+            'storageTierLevel',
+            'staasVersion',
+            'hasEncryptionAtRest',
+        ]
+        file_mask = ','.join(mask_items)
+        volume = self.get_file_volume_details(volume_id, mask=file_mask)
+
+        order = storage_utils.prepare_modify_order_object(
+            self, volume, new_iops, new_tier_level, new_size
+        )
+
+        return self.client.call('Product_Order', 'placeOrder', order)
+
     def delete_snapshot(self, snapshot_id):
         """Deletes the specified snapshot object.
 
@@ -327,21 +357,16 @@ class FileStorageManager(utils.IdentifierMixin, object):
         return self.client.call('Network_Storage', 'createSnapshot',
                                 notes, id=volume_id, **kwargs)
 
-    def enable_snapshots(self, volume_id, schedule_type, retention_count,
-                         minute, hour, day_of_week, **kwargs):
+    def enable_snapshots(self, volume_id, schedule_type, retention_count, minute, hour, day_of_week, **kwargs):
         """Enables snapshots for a specific file volume at a given schedule
 
         :param integer volume_id: The id of the volume
         :param string schedule_type: 'HOURLY'|'DAILY'|'WEEKLY'
-        :param integer retention_count: The number of snapshots to attempt to
-        retain in this schedule
-        :param integer minute: The minute of the hour at which HOURLY, DAILY,
-        and WEEKLY snapshots should be taken
-        :param integer hour: The hour of the day at which DAILY and WEEKLY
-        snapshots should be taken
-        :param string|integer day_of_week: The day of the week on which WEEKLY
-        snapshots should be taken, either as a string ('SUNDAY') or integer
-        ('0' is Sunday)
+        :param integer retention_count: The number of snapshots to attempt to retain in this schedule
+        :param integer minute: The minute of the hour at which HOURLY, DAILY, and WEEKLY snapshots should be taken
+        :param integer hour: The hour of the day at which DAILY and WEEKLY snapshots should be taken
+        :param string|integer day_of_week: The day of the week on which WEEKLY snapshots should be taken,
+                              either as a string ('SUNDAY') or integer ('0' is Sunday)
         :return: Returns whether successfully scheduled or not
         """
 
@@ -362,11 +387,23 @@ class FileStorageManager(utils.IdentifierMixin, object):
         :return: Returns whether successfully disabled or not
         """
 
-        return self.client.call('Network_Storage', 'disableSnapshots',
-                                schedule_type, id=volume_id)
+        return self.client.call('Network_Storage', 'disableSnapshots', schedule_type, id=volume_id)
 
-    def order_snapshot_space(self, volume_id, capacity, tier,
-                             upgrade, **kwargs):
+    def list_volume_schedules(self, volume_id):
+        """Lists schedules for a given volume
+
+        :param integer volume_id: The id of the volume
+        :return: Returns list of schedules assigned to a given volume
+        """
+        volume_detail = self.client.call(
+            'Network_Storage',
+            'getObject',
+            id=volume_id,
+            mask='schedules[type,properties[type]]')
+
+        return utils.lookup(volume_detail, 'schedules')
+
+    def order_snapshot_space(self, volume_id, capacity, tier, upgrade, **kwargs):
         """Orders snapshot space for the given file volume.
 
         :param integer volume_id: The ID of the volume
@@ -387,15 +424,12 @@ class FileStorageManager(utils.IdentifierMixin, object):
 
         return self.client.call('Product_Order', 'placeOrder', order)
 
-    def cancel_snapshot_space(self, volume_id,
-                              reason='No longer needed',
-                              immediate=False):
+    def cancel_snapshot_space(self, volume_id, reason='No longer needed', immediate=False):
         """Cancels snapshot space for a given volume.
 
         :param integer volume_id: The volume ID
         :param string reason: The reason for cancellation
-        :param boolean immediate: Cancel immediately or
-        on anniversary date
+        :param boolean immediate: Cancel immediately or on anniversary date
         """
 
         file_volume = self.get_file_volume_details(
@@ -438,15 +472,12 @@ class FileStorageManager(utils.IdentifierMixin, object):
         return self.client.call('Network_Storage', 'restoreFromSnapshot',
                                 snapshot_id, id=volume_id)
 
-    def cancel_file_volume(self, volume_id,
-                           reason='No longer needed',
-                           immediate=False):
+    def cancel_file_volume(self, volume_id, reason='No longer needed', immediate=False):
         """Cancels the given file storage volume.
 
         :param integer volume_id: The volume ID
         :param string reason: The reason for cancellation
-        :param boolean immediate: Cancel immediately or
-        on anniversary date
+        :param boolean immediate: Cancel immediately or on anniversary date
         """
         file_volume = self.get_file_volume_details(
             volume_id,

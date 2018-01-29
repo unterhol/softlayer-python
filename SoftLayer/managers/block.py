@@ -90,7 +90,7 @@ class BlockStorageManager(utils.IdentifierMixin, object):
                 'serviceResource.datacenter[name]',
                 'serviceResourceBackendIpAddress',
                 'storageTierLevel',
-                'iops',
+                'provisionedIops',
                 'lunId',
                 'originalVolumeName',
                 'originalSnapshotName',
@@ -105,8 +105,7 @@ class BlockStorageManager(utils.IdentifierMixin, object):
                 'replicationSchedule[type[keyname]]]',
             ]
             kwargs['mask'] = ','.join(items)
-        return self.client.call('Network_Storage', 'getObject',
-                                id=volume_id, **kwargs)
+        return self.client.call('Network_Storage', 'getObject', id=volume_id, **kwargs)
 
     def get_block_volume_access_list(self, volume_id, **kwargs):
         """Returns a list of authorized hosts for a specified volume.
@@ -118,7 +117,7 @@ class BlockStorageManager(utils.IdentifierMixin, object):
         if 'mask' not in kwargs:
             items = [
                 'id',
-                'allowedVirtualGuests[allowedHost[credential]]',
+                'allowedVirtualGuests[allowedHost[credential, sourceSubnet]]',
                 'allowedHardware[allowedHost[credential]]',
                 'allowedSubnets[allowedHost[credential]]',
                 'allowedIpAddresses[allowedHost[credential]]',
@@ -141,6 +140,7 @@ class BlockStorageManager(utils.IdentifierMixin, object):
                 'snapshotSizeBytes',
                 'storageType[keyName]',
                 'snapshotCreationTimestamp',
+                'intervalSchedule',
                 'hourlySchedule',
                 'dailySchedule',
                 'weeklySchedule'
@@ -237,8 +237,8 @@ class BlockStorageManager(utils.IdentifierMixin, object):
         block_mask = 'billingItem[activeChildren,hourlyFlag],'\
                      'storageTierLevel,osType,staasVersion,'\
                      'hasEncryptionAtRest,snapshotCapacityGb,schedules,'\
-                     'hourlySchedule,dailySchedule,weeklySchedule,'\
-                     'storageType[keyName],provisionedIops'
+                     'intervalSchedule,hourlySchedule,dailySchedule,'\
+                     'weeklySchedule,storageType[keyName],provisionedIops'
         block_volume = self.get_block_volume_details(volume_id,
                                                      mask=block_mask)
 
@@ -300,6 +300,35 @@ class BlockStorageManager(utils.IdentifierMixin, object):
 
         if origin_snapshot_id is not None:
             order['duplicateOriginSnapshotId'] = origin_snapshot_id
+
+        return self.client.call('Product_Order', 'placeOrder', order)
+
+    def order_modified_volume(self, volume_id, new_size=None, new_iops=None, new_tier_level=None):
+        """Places an order for modifying an existing block volume.
+
+        :param volume_id: The ID of the volume to be modified
+        :param new_size: The new size/capacity for the volume
+        :param new_iops: The new IOPS for the volume
+        :param new_tier_level: The new tier level for the volume
+        :return: Returns a SoftLayer_Container_Product_Order_Receipt
+        """
+
+        mask_items = [
+            'id',
+            'billingItem',
+            'storageType[keyName]',
+            'capacityGb',
+            'provisionedIops',
+            'storageTierLevel',
+            'staasVersion',
+            'hasEncryptionAtRest',
+        ]
+        block_mask = ','.join(mask_items)
+        volume = self.get_block_volume_details(volume_id, mask=block_mask)
+
+        order = storage_utils.prepare_modify_order_object(
+            self, volume, new_iops, new_tier_level, new_size
+        )
 
         return self.client.call('Product_Order', 'placeOrder', order)
 
@@ -379,8 +408,7 @@ class BlockStorageManager(utils.IdentifierMixin, object):
 
         :param integer volume_id: The volume ID
         :param string reason: The reason for cancellation
-        :param boolean immediate_flag: Cancel immediately or
-        on anniversary date
+        :param boolean immediate_flag: Cancel immediately or on anniversary date
         """
 
         block_volume = self.get_block_volume_details(
@@ -445,6 +473,20 @@ class BlockStorageManager(utils.IdentifierMixin, object):
         return self.client.call('Network_Storage', 'disableSnapshots',
                                 schedule_type, id=volume_id)
 
+    def list_volume_schedules(self, volume_id):
+        """Lists schedules for a given volume
+
+        :param integer volume_id: The id of the volume
+        :return: Returns list of schedules assigned to a given volume
+        """
+        volume_detail = self.client.call(
+            'Network_Storage',
+            'getObject',
+            id=volume_id,
+            mask='schedules[type,properties[type]]')
+
+        return utils.lookup(volume_detail, 'schedules')
+
     def restore_from_snapshot(self, volume_id, snapshot_id):
         """Restores a specific volume from a snapshot
 
@@ -463,8 +505,7 @@ class BlockStorageManager(utils.IdentifierMixin, object):
 
         :param integer volume_id: The volume ID
         :param string reason: The reason for cancellation
-        :param boolean immediate_flag: Cancel immediately or
-        on anniversary date
+        :param boolean immediate_flag: Cancel immediately or on anniversary date
         """
         block_volume = self.get_block_volume_details(
             volume_id,
