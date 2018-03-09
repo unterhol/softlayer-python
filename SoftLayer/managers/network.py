@@ -111,7 +111,9 @@ class NetworkManager(object):
         """
         if not isinstance(rules, list):
             raise TypeError("The rules provided must be a list of dictionaries")
-        return self.security_group.addRules(rules, id=group_id)
+        r_val = self.security_group.addRules(rules, id=group_id)
+        print('r_val add rules return '+str(r_val))
+        return r_val
 
     def add_subnet(self, subnet_type, quantity=None, vlan_id=None, version=4,
                    test_order=False):
@@ -201,8 +203,11 @@ class NetworkManager(object):
         :param int group_id: The ID of the security group
         :param list component_ids: The IDs of the network components to attach
         """
-        return self.security_group.attachNetworkComponents(component_ids,
+        r_val = self.security_group.attachNetworkComponents(component_ids,
                                                            id=group_id)
+        
+        print('r_val attach NC return '+str(r_val))
+        return r_val
 
     def cancel_global_ip(self, global_ip_id):
         """Cancels the specified global IP address.
