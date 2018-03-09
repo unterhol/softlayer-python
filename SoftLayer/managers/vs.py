@@ -272,7 +272,7 @@ class VSManager(utils.IdentifierMixin, object):
         :param string post_url: The URI of the post-install script to run
                                 after reload
         :param list ssh_keys: The SSH keys to add to the root user
-        :param int image_id: The ID of the image to load onto the server
+        :param int image_id: The GUID of the image to load onto the server
 
         .. warning::
             This will reformat the primary drive.
@@ -307,7 +307,7 @@ class VSManager(utils.IdentifierMixin, object):
             dedicated=False, public_vlan=None, private_vlan=None,
             userdata=None, nic_speed=None, disks=None, post_uri=None,
             private=False, ssh_keys=None, public_security_groups=None,
-            private_security_groups=None, **kwargs):
+            private_security_groups=None, boot_mode=None, **kwargs):
         """Returns a dict appropriate to pass into Virtual_Guest::createObject
 
             See :func:`create_instance` for a list of available options.
@@ -339,11 +339,14 @@ class VSManager(utils.IdentifierMixin, object):
             "hostname": hostname,
             "domain": domain,
             "localDiskFlag": local_disk,
-            "hourlyBillingFlag": hourly
+            "hourlyBillingFlag": hourly,
+            "supplementalCreateObjectOptions": {
+                "bootMode": boot_mode
+            }
         }
 
         if flavor:
-            data["supplementalCreateObjectOptions"] = {"flavorKeyName": flavor}
+            data["supplementalCreateObjectOptions"]["flavorKeyName"] = flavor
 
         if dedicated and not host_id:
             data["dedicatedAccountHostOnlyFlag"] = dedicated
@@ -534,7 +537,7 @@ class VSManager(utils.IdentifierMixin, object):
         :param bool local_disk: Flag to indicate if this should be a local disk (default) or a SAN disk.
         :param string datacenter: The short name of the data center in which the VS should reside.
         :param string os_code: The operating system to use. Cannot be specified  if image_id is specified.
-        :param int image_id: The ID of the image to load onto the server. Cannot be specified if os_code is specified.
+        :param int image_id: The GUID of the image to load onto the server. Cannot be specified if os_code is specified.
         :param bool dedicated: Flag to indicate if this should be housed on adedicated or shared host (default).
                                This will incur a fee on your account.
         :param int public_vlan: The ID of the public VLAN on which you want this VS placed.
